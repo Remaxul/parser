@@ -64,15 +64,17 @@ def save_collection_data(data, filename):
     logger.info(f"Данные коллекций сохранены в {filename}")
 
 def fetch_page(url, scroll=False, max_retries=3, max_scroll_time=360):
-    """Получает HTML-код страницы с помощью Selenium с повторными попытками."""
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless=new")  # Новый headless-режим
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--ignore-certificate-errors")
+    chrome_options.add_argument("--window-size=1920,1080")  # Установите размер окна
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--start-maximized")
 
     for attempt in range(max_retries):
         driver = None
@@ -80,7 +82,7 @@ def fetch_page(url, scroll=False, max_retries=3, max_scroll_time=360):
             with selenium_semaphore:
                 driver = webdriver.Chrome(options=chrome_options)
                 logger.info(f"Попытка {attempt + 1}/{max_retries}: Запуск Selenium для загрузки страницы: {url} (поток: {threading.current_thread().name})")
-                driver.set_page_load_timeout(30)
+                driver.set_page_load_timeout(60)  # Увеличьте таймаут до 60 секунд
                 driver.get(url)
 
                 # Ожидаем появления контейнера с коллекциями
