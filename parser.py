@@ -63,7 +63,7 @@ def save_collection_data(data, filename):
         json.dump(data, f, ensure_ascii=False, indent=4)
     logger.info(f"Данные коллекций сохранены в {filename}")
 
-def fetch_page(url, scroll=False, max_retries=3, max_scroll_time=360):
+def fetch_page(url, scroll=False, max_retries=3, max_scroll_time=600):
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")  # Новый headless-режим
     chrome_options.add_argument("--no-sandbox")
@@ -389,8 +389,8 @@ def run_scheduled_tasks():
     schedule.every(1).minutes.at(":30").do(lambda: threading.Thread(target=check_new_collections_slashlib, name="CheckThreadSlashlib").start())
 
     # Полный парсинг (смещён во времени)
-    schedule.every(60).minutes.do(lambda: threading.Thread(target=full_parse_mangalib, name="FullParseThreadMangalib").start())
-    schedule.every(60).minutes.at(":05").do(lambda: threading.Thread(target=full_parse_slashlib, name="FullParseThreadSlashlib").start())
+    schedule.every(1380).minutes.do(lambda: threading.Thread(target=full_parse_mangalib, name="FullParseThreadMangalib").start())
+    schedule.every(1380).minutes.at(":10").do(lambda: threading.Thread(target=full_parse_slashlib, name="FullParseThreadSlashlib").start())
 
     # Начальный запуск
     threading.Thread(target=check_new_collections_mangalib, name="InitialCheckMangalib").start()
