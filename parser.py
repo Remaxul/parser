@@ -29,7 +29,7 @@ COLLECTION_DATA_FILE_MANGALIB = "collection_data_mangalib.json"
 CURRENT_COLLECTIONS_FILE_SLASHLIB = "current_collections_slashlib.json"
 COLLECTION_DATA_FILE_SLASHLIB = "collection_data_slashlib.json"
 TELEGRAM_TOKEN = "7552508743:AAEmGQw499vk_94gzzbHh4drkZdsd45Zz9Q"
-CHAT_ID = "-1002589466518"
+CHAT_ID = "-1002619055628"
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # Флаг для остановки
