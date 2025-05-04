@@ -29,8 +29,8 @@ CURRENT_COLLECTIONS_FILE_MANGALIB = "current_collections_mangalib.json"
 COLLECTION_DATA_FILE_MANGALIB = "collection_data_mangalib.json"
 CURRENT_COLLECTIONS_FILE_SLASHLIB = "current_collections_slashlib.json"
 COLLECTION_DATA_FILE_SLASHLIB = "collection_data_slashlib.json"
-TELEGRAM_TOKEN = "7875890659:AAFqkDJFpoOF68T58_z84IEsi9OHDxER_kU"
-CHAT_ID = "-1002589466518"
+TELEGRAM_TOKEN = "7552508743:AAEmGQw499vk_94gzzbHh4drkZdsd45Zz9Q"
+CHAT_ID = "-1002619055628"
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # Флаг для остановки
@@ -334,7 +334,7 @@ def check_new_collections_mangalib():
             if truly_new_ids:
                 new_collections = [col for col in current_collections if col["id"] in truly_new_ids]
                 for col in new_collections:
-                    message = f"Mangalib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
+                    message = f"Mangalib - новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
                     queue_telegram_message(message, disable_web_page_preview=True)
                     logger.info(f"Отправлено уведомление в Telegram (Mangalib): {col['title']}")
             else:
@@ -401,7 +401,7 @@ def check_new_collections_slashlib():
             if truly_new_ids:
                 new_collections = [col for col in current_collections if col["id"] in truly_new_ids]
                 for col in new_collections:
-                    message = f"Slashlib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
+                    message = f"Slashlib - новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
                     queue_telegram_message(message, disable_web_page_preview=True)
                     logger.info(f"Отправлено уведомление в Telegram (Slashlib): {col['title']}")
             else:
