@@ -29,8 +29,8 @@ CURRENT_COLLECTIONS_FILE_MANGALIB = "current_collections_mangalib.json"
 COLLECTION_DATA_FILE_MANGALIB = "collection_data_mangalib.json"
 CURRENT_COLLECTIONS_FILE_SLASHLIB = "current_collections_slashlib.json"
 COLLECTION_DATA_FILE_SLASHLIB = "collection_data_slashlib.json"
-TELEGRAM_TOKEN = "7552508743:AAEmGQw499vk_94gzzbHh4drkZdsd45Zz9Q"
-CHAT_ID = "-1002619055628"
+TELEGRAM_TOKEN = "7875890659:AAFqkDJFpoOF68T58_z84IEsi9OHDxER_kU"
+CHAT_ID = "-1002589466518"
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # Флаг для остановки
@@ -52,18 +52,22 @@ def load_current_collections(filename):
     if os.path.exists(filename):
         with open(filename, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if isinstance(data, list) and all(isinstance(item, str) for item in data):
-                return set(data)
+            if isinstance(data, dict) and "ids" in data and "max_id" in data:
+                return set(data["ids"]), data["max_id"]
             else:
                 logger.warning(f"Некорректный формат данных в {filename}. Очищаем файл.")
-                return set()
-    return set()
+                return set(), "0"
+    return set(), "0"
 
 # Сохранение текущего состояния коллекций
-def save_current_collections(collection_ids, filename):
+def save_current_collections(collection_ids, max_id, filename):
+    data = {
+        "ids": list(collection_ids),
+        "max_id": max_id
+    }
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(list(collection_ids), f, ensure_ascii=False, indent=4)
-    logger.info(f"Состояние коллекций сохранено в {filename}")
+        json.dump(data, f, ensure_ascii=False, indent=4)
+    logger.info(f"Состояние коллекций сохранено в {filename} с max_id: {max_id}")
 
 # Загрузка данных о коллекциях (для полного парсинга)
 def load_collection_data(filename):
@@ -244,20 +248,31 @@ async def telegram_message_worker():
     """Асинхронный обработчик очереди сообщений для отправки в Telegram."""
     while running:
         try:
-            message = await message_queue.get()
-            if message is None:
+            message_data = await message_queue.get()
+            if message_data is None:
                 break
-            await bot.send_message(chat_id=CHAT_ID, text=message)
+            # Извлекаем текст и параметры из словаря
+            text = message_data.get("text", "")
+            disable_preview = message_data.get("disable_web_page_preview", False)
+            await bot.send_message(
+                chat_id=CHAT_ID,
+                text=text,
+                disable_web_page_preview=disable_preview
+            )
             logger.info("Сообщение успешно отправлено в Telegram.")
         except Exception as e:
             logger.error(f"Ошибка при отправке сообщения в Telegram: {e}")
         finally:
             message_queue.task_done()
 
-def queue_telegram_message(message):
-    """Добавляет сообщение в очередь для отправки в Telegram."""
+def queue_telegram_message(message, disable_web_page_preview=True):
+    """Добавляет сообщение в очередь для отправки в Telegram с параметром отключения предпросмотра."""
     try:
-        asyncio.run_coroutine_threadsafe(message_queue.put(message), loop)
+        message_data = {
+            "text": message,
+            "disable_web_page_preview": disable_web_page_preview
+        }
+        asyncio.run_coroutine_threadsafe(message_queue.put(message_data), loop)
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в очередь: {e}")
 
@@ -270,8 +285,10 @@ def initialize_current_collections(collection_data_file, current_collections_fil
 
     # Берём первые MAX_IDS ID
     initial_ids = [col["id"] for col in collections_data[:MAX_IDS]]
-    save_current_collections(initial_ids, current_collections_file)
-    logger.info(f"Инициализировано {len(initial_ids)} ID для {site_name} в {current_collections_file}.")
+    # Находим максимальный ID
+    max_id = max(initial_ids) if initial_ids else "0"
+    save_current_collections(initial_ids, max_id, current_collections_file)
+    logger.info(f"Инициализировано {len(initial_ids)} ID для {site_name} в {current_collections_file} с max_id: {max_id}.")
 
 def check_new_collections_mangalib():
     """Проверяет наличие новых коллекций на Mangalib и отправляет уведомления в Telegram."""
@@ -299,21 +316,29 @@ def check_new_collections_mangalib():
 
         # Извлекаем первые MAX_IDS ID из текущего парсинга
         current_ids = {col["id"] for col in current_collections[:MAX_IDS]}
-        previous_ids = load_current_collections(CURRENT_COLLECTIONS_FILE_MANGALIB)
+        previous_ids, previous_max_id = load_current_collections(CURRENT_COLLECTIONS_FILE_MANGALIB)
 
         # Логируем для отладки
         logger.info(f"Mangalib: Текущие ID коллекций ({len(current_ids)}): {current_ids}")
         logger.info(f"Mangalib: Предыдущие ID коллекций ({len(previous_ids)}): {previous_ids}")
+        logger.info(f"Mangalib: Предыдущий максимальный ID: {previous_max_id}")
 
         # Проверяем новые коллекции
         new_ids = current_ids - previous_ids
         if new_ids:
-            logger.info(f"Найдено {len(new_ids)} новых коллекций (Mangalib): {new_ids}")
-            new_collections = [col for col in current_collections if col["id"] in new_ids]
-            for col in new_collections:
-                message = f"Mangalib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
-                queue_telegram_message(message)
-                logger.info(f"Отправлено уведомление в Telegram (Mangalib): {col['title']}")
+            # Фильтруем новые коллекции: ID должен быть больше предыдущего максимального
+            truly_new_ids = {id_ for id_ in new_ids if id_ > previous_max_id}
+            logger.info(f"Найдено {len(new_ids)} потенциально новых коллекций (Mangalib): {new_ids}")
+            logger.info(f"Из них действительно новых (ID > {previous_max_id}): {truly_new_ids}")
+
+            if truly_new_ids:
+                new_collections = [col for col in current_collections if col["id"] in truly_new_ids]
+                for col in new_collections:
+                    message = f"Mangalib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
+                    queue_telegram_message(message, disable_web_page_preview=True)
+                    logger.info(f"Отправлено уведомление в Telegram (Mangalib): {col['title']}")
+            else:
+                logger.info("Нет действительно новых коллекций (Mangalib).")
         else:
             logger.info("Новых коллекций не найдено (Mangalib).")
 
@@ -324,7 +349,9 @@ def check_new_collections_mangalib():
 
         # Обновляем состояние только если есть изменения
         if new_ids or removed_ids:
-            save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_MANGALIB)
+            # Обновляем максимальный ID, если есть действительно новые коллекции
+            new_max_id = max(current_ids) if current_ids else previous_max_id
+            save_current_collections(current_ids, new_max_id, CURRENT_COLLECTIONS_FILE_MANGALIB)
         else:
             logger.info("Изменений в коллекциях не обнаружено, пропускаем сохранение (Mangalib).")
     finally:
@@ -356,21 +383,29 @@ def check_new_collections_slashlib():
 
         # Извлекаем первые MAX_IDS ID из текущего парсинга
         current_ids = {col["id"] for col in current_collections[:MAX_IDS]}
-        previous_ids = load_current_collections(CURRENT_COLLECTIONS_FILE_SLASHLIB)
+        previous_ids, previous_max_id = load_current_collections(CURRENT_COLLECTIONS_FILE_SLASHLIB)
 
         # Логируем для отладки
         logger.info(f"Slashlib: Текущие ID коллекций ({len(current_ids)}): {current_ids}")
         logger.info(f"Slashlib: Предыдущие ID коллекций ({len(previous_ids)}): {previous_ids}")
+        logger.info(f"Slashlib: Предыдущий максимальный ID: {previous_max_id}")
 
         # Проверяем новые коллекции
         new_ids = current_ids - previous_ids
         if new_ids:
-            logger.info(f"Найдено {len(new_ids)} новых коллекций (Slashlib): {new_ids}")
-            new_collections = [col for col in current_collections if col["id"] in new_ids]
-            for col in new_collections:
-                message = f"Slashlib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
-                queue_telegram_message(message)
-                logger.info(f"Отправлено уведомление в Telegram (Slashlib): {col['title']}")
+            # Фильтруем новые коллекции: ID должен быть больше предыдущего максимального
+            truly_new_ids = {id_ for id_ in new_ids if id_ > previous_max_id}
+            logger.info(f"Найдено {len(new_ids)} потенциально новых коллекций (Slashlib): {new_ids}")
+            logger.info(f"Из них действительно новых (ID > {previous_max_id}): {truly_new_ids}")
+
+            if truly_new_ids:
+                new_collections = [col for col in current_collections if col["id"] in truly_new_ids]
+                for col in new_collections:
+                    message = f"Slashlib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
+                    queue_telegram_message(message, disable_web_page_preview=True)
+                    logger.info(f"Отправлено уведомление в Telegram (Slashlib): {col['title']}")
+            else:
+                logger.info("Нет действительно новых коллекций (Slashlib).")
         else:
             logger.info("Новых коллекций не найдено (Slashlib).")
 
@@ -381,7 +416,9 @@ def check_new_collections_slashlib():
 
         # Обновляем состояние только если есть изменения
         if new_ids or removed_ids:
-            save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_SLASHLIB)
+            # Обновляем максимальный ID, если есть действительно новые коллекции
+            new_max_id = max(current_ids) if current_ids else previous_max_id
+            save_current_collections(current_ids, new_max_id, CURRENT_COLLECTIONS_FILE_SLASHLIB)
         else:
             logger.info("Изменений в коллекциях не обнаружено, пропускаем сохранение (Slashlib).")
     finally:
