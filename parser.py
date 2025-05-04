@@ -16,6 +16,7 @@ from telegram import Bot
 import schedule
 import os
 from threading import Semaphore
+from urllib.parse import urlparse, parse_qs
 
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -49,7 +50,13 @@ loop = None
 def load_current_collections(filename):
     if os.path.exists(filename):
         with open(filename, "r", encoding="utf-8") as f:
-            return set(json.load(f))
+            data = json.load(f)
+            # Убедимся, что данные - это список строк
+            if isinstance(data, list) and all(isinstance(item, str) for item in data):
+                return set(data)
+            else:
+                logger.warning(f"Некорректный формат данных в {filename}. Очищаем файл.")
+                return set()
     return set()
 
 
@@ -146,6 +153,16 @@ def fetch_page(url, scroll=False, max_retries=3, max_scroll_time=600):
                 return None
 
 
+def extract_collection_id(link):
+    """Извлекает ID коллекции из ссылки, игнорируя параметры запроса."""
+    parsed_url = urlparse(link)
+    path = parsed_url.path
+    collection_id = path.split("/collections/")[-1] if "/collections/" in path else path
+    # Удаляем параметры запроса, если они есть
+    collection_id = collection_id.split("?")[0]
+    return collection_id
+
+
 def parse_collections(html_content, site="mangalib"):
     """Парсит все коллекции из HTML-кода страницы."""
     if not html_content:
@@ -200,7 +217,7 @@ def parse_collections(html_content, site="mangalib"):
         base_url = "https://mangalib.me" if site == "mangalib" else "https://v2.shlib.life"
         if link and not link.startswith(base_url):
             link = base_url + link
-        collection_id = link.split("/collections/")[-1] if "/collections/" in link else link
+        collection_id = extract_collection_id(link)
         logger.info(f"Извлечённая ссылка: {link}, ID: {collection_id}")
 
         # Находим блок с названием внутри тега <a> (div.ox_e2)
@@ -218,7 +235,8 @@ def parse_collections(html_content, site="mangalib"):
         # Добавляем данные о коллекции в список
         collections_data.append({
             "title": title,
-            "link": link
+            "link": link,
+            "id": collection_id
         })
 
     logger.info(f"Всего извлечено {len(collections_data)} коллекций.")
@@ -273,15 +291,18 @@ def check_new_collections_mangalib():
             return
 
         # Извлекаем ID коллекций
-        current_ids = {col["link"].split("/collections/")[-1] for col in current_collections if
-                       "/collections/" in col["link"]}
+        current_ids = {col["id"] for col in current_collections}
         previous_ids = load_current_collections(CURRENT_COLLECTIONS_FILE_MANGALIB)
+
+        # Логируем для отладки
+        logger.info(f"Mangalib: Текущие ID коллекций ({len(current_ids)}): {current_ids}")
+        logger.info(f"Mangalib: Предыдущие ID коллекций ({len(previous_ids)}): {previous_ids}")
 
         # Проверяем новые коллекции
         new_ids = current_ids - previous_ids
         if new_ids:
             logger.info(f"Найдено {len(new_ids)} новых коллекций (Mangalib): {new_ids}")
-            new_collections = [col for col in current_collections if col["link"].split("/collections/")[-1] in new_ids]
+            new_collections = [col for col in current_collections if col["id"] in new_ids]
             for col in new_collections:
                 message = f"Mangalib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
                 queue_telegram_message(message)
@@ -297,6 +318,8 @@ def check_new_collections_mangalib():
         # Обновляем состояние только если есть изменения
         if new_ids or removed_ids:
             save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_MANGALIB)
+        else:
+            logger.info("Изменений в коллекциях не обнаружено, пропускаем сохранение (Mangalib).")
     finally:
         check_running = False
 
@@ -326,15 +349,18 @@ def check_new_collections_slashlib():
             return
 
         # Извлекаем ID коллекций
-        current_ids = {col["link"].split("/collections/")[-1] for col in current_collections if
-                       "/collections/" in col["link"]}
+        current_ids = {col["id"] for col in current_collections}
         previous_ids = load_current_collections(CURRENT_COLLECTIONS_FILE_SLASHLIB)
+
+        # Логируем для отладки
+        logger.info(f"Slashlib: Текущие ID коллекций ({len(current_ids)}): {current_ids}")
+        logger.info(f"Slashlib: Предыдущие ID коллекций ({len(previous_ids)}): {previous_ids}")
 
         # Проверяем новые коллекции
         new_ids = current_ids - previous_ids
         if new_ids:
             logger.info(f"Найдено {len(new_ids)} новых коллекций (Slashlib): {new_ids}")
-            new_collections = [col for col in current_collections if col["link"].split("/collections/")[-1] in new_ids]
+            new_collections = [col for col in current_collections if col["id"] in new_ids]
             for col in new_collections:
                 message = f"Slashlib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
                 queue_telegram_message(message)
@@ -350,8 +376,21 @@ def check_new_collections_slashlib():
         # Обновляем состояние только если есть изменения
         if new_ids or removed_ids:
             save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_SLASHLIB)
+        else:
+            logger.info("Изменений в коллекциях не обнаружено, пропускаем сохранение (Slashlib).")
     finally:
         check_running = False
+
+
+def sequential_minute_checks():
+    """Последовательное выполнение ежеминутных проверок для Mangalib и Slashlib."""
+    if not running:
+        return
+    logger.info("Запуск последовательных ежеминутных проверок...")
+    # Сначала проверяем Mangalib
+    check_new_collections_mangalib()
+    # Затем Slashlib
+    check_new_collections_slashlib()
 
 
 def full_parse_mangalib():
@@ -372,8 +411,7 @@ def full_parse_mangalib():
             return
 
         save_collection_data(collections_data, COLLECTION_DATA_FILE_MANGALIB)
-        current_ids = {col["link"].split("/collections/")[-1] for col in collections_data if
-                       "/collections/" in col["link"]}
+        current_ids = {col["id"] for col in collections_data}
 
         # Инициализация current_collections при первом запуске
         if not os.path.exists(CURRENT_COLLECTIONS_FILE_MANGALIB):
@@ -401,8 +439,7 @@ def full_parse_slashlib():
             return
 
         save_collection_data(collections_data, COLLECTION_DATA_FILE_SLASHLIB)
-        current_ids = {col["link"].split("/collections/")[-1] for col in collections_data if
-                       "/collections/" in col["link"]}
+        current_ids = {col["id"] for col in collections_data}
 
         # Инициализация current_collections при первом запуске
         if not os.path.exists(CURRENT_COLLECTIONS_FILE_SLASHLIB):
@@ -414,11 +451,9 @@ def full_parse_slashlib():
 
 def run_scheduled_tasks():
     """Запуск задач в отдельных потоках."""
-    # Минутные проверки (смещены во времени)
+    # Ежеминутные проверки (последовательно)
     schedule.every(1).minutes.do(
-        lambda: threading.Thread(target=check_new_collections_mangalib, name="CheckThreadMangalib").start())
-    schedule.every(1).minutes.at(":30").do(
-        lambda: threading.Thread(target=check_new_collections_slashlib, name="CheckThreadSlashlib").start())
+        lambda: threading.Thread(target=sequential_minute_checks, name="MinuteCheckThread").start())
 
     # Полный парсинг (смещён во времени)
     schedule.every(1380).minutes.do(
