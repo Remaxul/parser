@@ -28,8 +28,8 @@ CURRENT_COLLECTIONS_FILE_MANGALIB = "current_collections_mangalib.json"
 COLLECTION_DATA_FILE_MANGALIB = "collection_data_mangalib.json"
 CURRENT_COLLECTIONS_FILE_SLASHLIB = "current_collections_slashlib.json"
 COLLECTION_DATA_FILE_SLASHLIB = "collection_data_slashlib.json"
-TELEGRAM_TOKEN = "7552508743:AAEmGQw499vk_94gzzbHh4drkZdsd45Zz9Q"
-CHAT_ID = "-1002619055628"
+TELEGRAM_TOKEN = "7875890659:AAFqkDJFpoOF68T58_z84IEsi9OHDxER_kU"
+CHAT_ID = "-1002589466518"
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # Флаг для остановки
@@ -44,6 +44,7 @@ selenium_semaphore = Semaphore(1)
 message_queue = asyncio.Queue()
 loop = None
 
+
 # Загрузка текущего состояния коллекций
 def load_current_collections(filename):
     if os.path.exists(filename):
@@ -51,11 +52,13 @@ def load_current_collections(filename):
             return set(json.load(f))
     return set()
 
+
 # Сохранение текущего состояния коллекций
 def save_current_collections(collection_ids, filename):
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(list(collection_ids), f, ensure_ascii=False, indent=4)
     logger.info(f"Состояние коллекций сохранено в {filename}")
+
 
 # Сохранение данных о коллекциях
 def save_collection_data(data, filename):
@@ -63,12 +66,14 @@ def save_collection_data(data, filename):
         json.dump(data, f, ensure_ascii=False, indent=4)
     logger.info(f"Данные коллекций сохранены в {filename}")
 
+
 def fetch_page(url, scroll=False, max_retries=3, max_scroll_time=600):
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")  # Новый headless-режим
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36")
+    chrome_options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--ignore-certificate-errors")
@@ -81,7 +86,8 @@ def fetch_page(url, scroll=False, max_retries=3, max_scroll_time=600):
         try:
             with selenium_semaphore:
                 driver = webdriver.Chrome(options=chrome_options)
-                logger.info(f"Попытка {attempt + 1}/{max_retries}: Запуск Selenium для загрузки страницы: {url} (поток: {threading.current_thread().name})")
+                logger.info(
+                    f"Попытка {attempt + 1}/{max_retries}: Запуск Selenium для загрузки страницы: {url} (поток: {threading.current_thread().name})")
                 driver.set_page_load_timeout(60)  # Увеличьте таймаут до 60 секунд
                 driver.get(url)
 
@@ -107,11 +113,13 @@ def fetch_page(url, scroll=False, max_retries=3, max_scroll_time=600):
                             logger.info("Высота и количество элементов не изменились, прокрутка завершена.")
                             break
                         if elapsed_time > max_scroll_time:
-                            logger.warning(f"Превышено максимальное время прокрутки ({max_scroll_time} сек). Останавливаем прокрутку.")
+                            logger.warning(
+                                f"Превышено максимальное время прокрутки ({max_scroll_time} сек). Останавливаем прокрутку.")
                             break
                         last_height = new_height
                         initial_fade_count = current_fade_count
-                        logger.info(f"Прокрутка страницы: подгружаются новые коллекции... (текущее количество fade: {current_fade_count})")
+                        logger.info(
+                            f"Прокрутка страницы: подгружаются новые коллекции... (текущее количество fade: {current_fade_count})")
 
                     # Ожидаем, пока появится хотя бы один элемент с классом fade
                     WebDriverWait(driver, 15).until(
@@ -136,6 +144,7 @@ def fetch_page(url, scroll=False, max_retries=3, max_scroll_time=600):
             else:
                 logger.error("Все попытки исчерпаны.")
                 return None
+
 
 def parse_collections(html_content, site="mangalib"):
     """Парсит все коллекции из HTML-кода страницы."""
@@ -215,6 +224,7 @@ def parse_collections(html_content, site="mangalib"):
     logger.info(f"Всего извлечено {len(collections_data)} коллекций.")
     return collections_data
 
+
 async def telegram_message_worker():
     """Асинхронный обработчик очереди сообщений для отправки в Telegram."""
     while running:
@@ -229,12 +239,14 @@ async def telegram_message_worker():
         finally:
             message_queue.task_done()
 
+
 def queue_telegram_message(message):
     """Добавляет сообщение в очередь для отправки в Telegram."""
     try:
         asyncio.run_coroutine_threadsafe(message_queue.put(message), loop)
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в очередь: {e}")
+
 
 def check_new_collections_mangalib():
     """Проверяет наличие новых коллекций на Mangalib и отправляет уведомления в Telegram."""
@@ -261,7 +273,8 @@ def check_new_collections_mangalib():
             return
 
         # Извлекаем ID коллекций
-        current_ids = {col["link"].split("/collections/")[-1] for col in current_collections if "/collections/" in col["link"]}
+        current_ids = {col["link"].split("/collections/")[-1] for col in current_collections if
+                       "/collections/" in col["link"]}
         previous_ids = load_current_collections(CURRENT_COLLECTIONS_FILE_MANGALIB)
 
         # Проверяем новые коллекции
@@ -281,10 +294,12 @@ def check_new_collections_mangalib():
         if removed_ids:
             logger.info(f"Удалено {len(removed_ids)} коллекций (Mangalib): {removed_ids}")
 
-        # Обновляем состояние
-        save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_MANGALIB)
+        # Обновляем состояние только если есть изменения
+        if new_ids or removed_ids:
+            save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_MANGALIB)
     finally:
         check_running = False
+
 
 def check_new_collections_slashlib():
     """Проверяет наличие новых коллекций на Slashlib и отправляет уведомления в Telegram."""
@@ -311,7 +326,8 @@ def check_new_collections_slashlib():
             return
 
         # Извлекаем ID коллекций
-        current_ids = {col["link"].split("/collections/")[-1] for col in current_collections if "/collections/" in col["link"]}
+        current_ids = {col["link"].split("/collections/")[-1] for col in current_collections if
+                       "/collections/" in col["link"]}
         previous_ids = load_current_collections(CURRENT_COLLECTIONS_FILE_SLASHLIB)
 
         # Проверяем новые коллекции
@@ -331,10 +347,12 @@ def check_new_collections_slashlib():
         if removed_ids:
             logger.info(f"Удалено {len(removed_ids)} коллекций (Slashlib): {removed_ids}")
 
-        # Обновляем состояние
-        save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_SLASHLIB)
+        # Обновляем состояние только если есть изменения
+        if new_ids or removed_ids:
+            save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_SLASHLIB)
     finally:
         check_running = False
+
 
 def full_parse_mangalib():
     """Полный парсинг всех коллекций с прокруткой (Mangalib)."""
@@ -354,10 +372,16 @@ def full_parse_mangalib():
             return
 
         save_collection_data(collections_data, COLLECTION_DATA_FILE_MANGALIB)
-        current_ids = {col["link"].split("/collections/")[-1] for col in collections_data if "/collections/" in col["link"]}
-        save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_MANGALIB)
+        current_ids = {col["link"].split("/collections/")[-1] for col in collections_data if
+                       "/collections/" in col["link"]}
+
+        # Инициализация current_collections при первом запуске
+        if not os.path.exists(CURRENT_COLLECTIONS_FILE_MANGALIB):
+            save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_MANGALIB)
+            logger.info("Инициализирован файл current_collections_mangalib.json при первом запуске.")
     finally:
         full_parse_running = False
+
 
 def full_parse_slashlib():
     """Полный парсинг всех коллекций с прокруткой (Slashlib)."""
@@ -377,31 +401,40 @@ def full_parse_slashlib():
             return
 
         save_collection_data(collections_data, COLLECTION_DATA_FILE_SLASHLIB)
-        current_ids = {col["link"].split("/collections/")[-1] for col in collections_data if "/collections/" in col["link"]}
-        save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_SLASHLIB)
+        current_ids = {col["link"].split("/collections/")[-1] for col in collections_data if
+                       "/collections/" in col["link"]}
+
+        # Инициализация current_collections при первом запуске
+        if not os.path.exists(CURRENT_COLLECTIONS_FILE_SLASHLIB):
+            save_current_collections(current_ids, CURRENT_COLLECTIONS_FILE_SLASHLIB)
+            logger.info("Инициализирован файл current_collections_slashlib.json при первом запуске.")
     finally:
         full_parse_running = False
+
 
 def run_scheduled_tasks():
     """Запуск задач в отдельных потоках."""
     # Минутные проверки (смещены во времени)
-    schedule.every(1).minutes.do(lambda: threading.Thread(target=check_new_collections_mangalib, name="CheckThreadMangalib").start())
-    schedule.every(1).minutes.at(":30").do(lambda: threading.Thread(target=check_new_collections_slashlib, name="CheckThreadSlashlib").start())
+    schedule.every(1).minutes.do(
+        lambda: threading.Thread(target=check_new_collections_mangalib, name="CheckThreadMangalib").start())
+    schedule.every(1).minutes.at(":30").do(
+        lambda: threading.Thread(target=check_new_collections_slashlib, name="CheckThreadSlashlib").start())
 
     # Полный парсинг (смещён во времени)
-    schedule.every(1380).minutes.do(lambda: threading.Thread(target=full_parse_mangalib, name="FullParseThreadMangalib").start())
-    schedule.every(1380).minutes.at(":10").do(lambda: threading.Thread(target=full_parse_slashlib, name="FullParseThreadSlashlib").start())
+    schedule.every(1380).minutes.do(
+        lambda: threading.Thread(target=full_parse_mangalib, name="FullParseThreadMangalib").start())
+    schedule.every(1380).minutes.at(":10").do(
+        lambda: threading.Thread(target=full_parse_slashlib, name="FullParseThreadSlashlib").start())
 
     # Начальный запуск
-    threading.Thread(target=check_new_collections_mangalib, name="InitialCheckMangalib").start()
     threading.Thread(target=full_parse_mangalib, name="InitialFullParseMangalib").start()
-    threading.Thread(target=check_new_collections_slashlib, name="InitialCheckSlashlib").start()
     threading.Thread(target=full_parse_slashlib, name="InitialFullParseSlashlib").start()
 
     # Бесконечный цикл для выполнения расписания
     while running:
         schedule.run_pending()
         time.sleep(1)
+
 
 def signal_handler(sig, frame):
     """Обработчик сигналов для корректного завершения."""
@@ -411,9 +444,11 @@ def signal_handler(sig, frame):
     asyncio.run_coroutine_threadsafe(message_queue.put(None), loop)
     sys.exit(0)
 
+
 async def main_async():
     """Запуск асинхронного цикла для обработки сообщений."""
     await telegram_message_worker()
+
 
 if __name__ == "__main__":
     # Создаём событийный цикл в главном потоке
