@@ -25,12 +25,11 @@ logger = logging.getLogger(__name__)
 # Конфигурация
 MANGALIB_URL = "https://mangalib.me/ru/collections"
 SLASHLIB_URL = "https://v2.shlib.life/ru/collections"
-CURRENT_COLLECTIONS_FILE_MANGALIB = "current_collections_mangalib.json"
 COLLECTION_DATA_FILE_MANGALIB = "collection_data_mangalib.json"
-CURRENT_COLLECTIONS_FILE_SLASHLIB = "current_collections_slashlib.json"
 COLLECTION_DATA_FILE_SLASHLIB = "collection_data_slashlib.json"
-TELEGRAM_TOKEN = "7552508743:AAEmGQw499vk_94gzzbHh4drkZdsd45Zz9Q"
-CHAT_ID = "-1002619055628"
+PROCESSED_COLLECTIONS_FILE = "processed_collections.json"  # Единый файл для всех обработанных коллекций
+TELEGRAM_TOKEN = "7875890659:AAFqkDJFpoOF68T58_z84IEsi9OHDxER_kU"
+CHAT_ID = "-1002589466518"
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # Флаг для остановки
@@ -47,8 +46,8 @@ loop = None
 # Максимальное количество ID для ежеминутного парсинга
 MAX_IDS = 15
 
-# Загрузка текущего состояния коллекций
-def load_current_collections(filename):
+# Загрузка обработанных коллекций
+def load_processed_collections(filename):
     if os.path.exists(filename):
         with open(filename, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -59,15 +58,15 @@ def load_current_collections(filename):
                 return set(), "0"
     return set(), "0"
 
-# Сохранение текущего состояния коллекций
-def save_current_collections(collection_ids, max_id, filename):
+# Сохранение обработанных коллекций
+def save_processed_collections(collection_ids, max_id, filename):
     data = {
         "ids": list(collection_ids),
         "max_id": max_id
     }
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-    logger.info(f"Состояние коллекций сохранено в {filename} с max_id: {max_id}")
+    logger.info(f"Обработанные коллекции сохранены в {filename} с max_id: {max_id}")
 
 # Загрузка данных о коллекциях (для полного парсинга)
 def load_collection_data(filename):
@@ -276,19 +275,29 @@ def queue_telegram_message(message, disable_web_page_preview=True):
     except Exception as e:
         logger.error(f"Ошибка при добавлении сообщения в очередь: {e}")
 
-def initialize_current_collections(collection_data_file, current_collections_file, site_name):
-    """Инициализирует файл текущих коллекций, беря первые MAX_IDS ID из полного парсинга."""
-    collections_data = load_collection_data(collection_data_file)
-    if not collections_data:
-        logger.warning(f"Нет данных для инициализации текущих коллекций ({site_name}).")
+def initialize_processed_collections(collection_data_file_mangalib, collection_data_file_slashlib):
+    """Инициализирует файл обработанных коллекций, беря первые MAX_IDS ID из полного парсинга обоих сайтов."""
+    # Загружаем данные с обоих сайтов
+    collections_mangalib = load_collection_data(collection_data_file_mangalib)
+    collections_slashlib = load_collection_data(collection_data_file_slashlib)
+
+    if not collections_mangalib and not collections_slashlib:
+        logger.warning("Нет данных для инициализации обработанных коллекций.")
         return
 
-    # Берём первые MAX_IDS ID
-    initial_ids = [col["id"] for col in collections_data[:MAX_IDS]]
+    # Собираем первые MAX_IDS ID с обоих сайтов
+    initial_ids = set()
+    # Mangalib
+    mangalib_ids = [col["id"] for col in collections_mangalib[:MAX_IDS]]
+    initial_ids.update(mangalib_ids)
+    # Slashlib
+    slashlib_ids = [col["id"] for col in collections_slashlib[:MAX_IDS]]
+    initial_ids.update(slashlib_ids)
+
     # Находим максимальный ID
     max_id = max(initial_ids) if initial_ids else "0"
-    save_current_collections(initial_ids, max_id, current_collections_file)
-    logger.info(f"Инициализировано {len(initial_ids)} ID для {site_name} в {current_collections_file} с max_id: {max_id}.")
+    save_processed_collections(initial_ids, max_id, PROCESSED_COLLECTIONS_FILE)
+    logger.info(f"Инициализировано {len(initial_ids)} уникальных ID в {PROCESSED_COLLECTIONS_FILE} с max_id: {max_id}.")
 
 def check_new_collections_mangalib():
     """Проверяет наличие новых коллекций на Mangalib и отправляет уведомления в Telegram."""
@@ -316,15 +325,15 @@ def check_new_collections_mangalib():
 
         # Извлекаем первые MAX_IDS ID из текущего парсинга
         current_ids = {col["id"] for col in current_collections[:MAX_IDS]}
-        previous_ids, previous_max_id = load_current_collections(CURRENT_COLLECTIONS_FILE_MANGALIB)
+        processed_ids, previous_max_id = load_processed_collections(PROCESSED_COLLECTIONS_FILE)
 
         # Логируем для отладки
         logger.info(f"Mangalib: Текущие ID коллекций ({len(current_ids)}): {current_ids}")
-        logger.info(f"Mangalib: Предыдущие ID коллекций ({len(previous_ids)}): {previous_ids}")
+        logger.info(f"Mangalib: Обработанные ID коллекций ({len(processed_ids)}): {processed_ids}")
         logger.info(f"Mangalib: Предыдущий максимальный ID: {previous_max_id}")
 
         # Проверяем новые коллекции
-        new_ids = current_ids - previous_ids
+        new_ids = current_ids - processed_ids
         if new_ids:
             # Фильтруем новые коллекции: ID должен быть больше предыдущего максимального
             truly_new_ids = {id_ for id_ in new_ids if id_ > previous_max_id}
@@ -334,24 +343,26 @@ def check_new_collections_mangalib():
             if truly_new_ids:
                 new_collections = [col for col in current_collections if col["id"] in truly_new_ids]
                 for col in new_collections:
-                    message = f"Mangalib - новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
+                    message = f"Mangalib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
                     queue_telegram_message(message, disable_web_page_preview=True)
                     logger.info(f"Отправлено уведомление в Telegram (Mangalib): {col['title']}")
+                # Обновляем обработанные ID
+                processed_ids.update(truly_new_ids)
             else:
                 logger.info("Нет действительно новых коллекций (Mangalib).")
         else:
             logger.info("Новых коллекций не найдено (Mangalib).")
 
         # Проверяем удалённые коллекции
-        removed_ids = previous_ids - current_ids
+        removed_ids = processed_ids - current_ids
         if removed_ids:
             logger.info(f"Удалено {len(removed_ids)} коллекций (Mangalib): {removed_ids}")
 
         # Обновляем состояние только если есть изменения
         if new_ids or removed_ids:
             # Обновляем максимальный ID, если есть действительно новые коллекции
-            new_max_id = max(current_ids) if current_ids else previous_max_id
-            save_current_collections(current_ids, new_max_id, CURRENT_COLLECTIONS_FILE_MANGALIB)
+            new_max_id = max(processed_ids) if processed_ids else previous_max_id
+            save_processed_collections(processed_ids, new_max_id, PROCESSED_COLLECTIONS_FILE)
         else:
             logger.info("Изменений в коллекциях не обнаружено, пропускаем сохранение (Mangalib).")
     finally:
@@ -383,15 +394,15 @@ def check_new_collections_slashlib():
 
         # Извлекаем первые MAX_IDS ID из текущего парсинга
         current_ids = {col["id"] for col in current_collections[:MAX_IDS]}
-        previous_ids, previous_max_id = load_current_collections(CURRENT_COLLECTIONS_FILE_SLASHLIB)
+        processed_ids, previous_max_id = load_processed_collections(PROCESSED_COLLECTIONS_FILE)
 
         # Логируем для отладки
         logger.info(f"Slashlib: Текущие ID коллекций ({len(current_ids)}): {current_ids}")
-        logger.info(f"Slashlib: Предыдущие ID коллекций ({len(previous_ids)}): {previous_ids}")
+        logger.info(f"Slashlib: Обработанные ID коллекций ({len(processed_ids)}): {processed_ids}")
         logger.info(f"Slashlib: Предыдущий максимальный ID: {previous_max_id}")
 
         # Проверяем новые коллекции
-        new_ids = current_ids - previous_ids
+        new_ids = current_ids - processed_ids
         if new_ids:
             # Фильтруем новые коллекции: ID должен быть больше предыдущего максимального
             truly_new_ids = {id_ for id_ in new_ids if id_ > previous_max_id}
@@ -401,31 +412,33 @@ def check_new_collections_slashlib():
             if truly_new_ids:
                 new_collections = [col for col in current_collections if col["id"] in truly_new_ids]
                 for col in new_collections:
-                    message = f"Slashlib - новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
+                    message = f"Slashlib: Новая коллекция:\nНазвание: {col['title']}\nСсылка: {col['link']}"
                     queue_telegram_message(message, disable_web_page_preview=True)
                     logger.info(f"Отправлено уведомление в Telegram (Slashlib): {col['title']}")
+                # Обновляем обработанные ID
+                processed_ids.update(truly_new_ids)
             else:
                 logger.info("Нет действительно новых коллекций (Slashlib).")
         else:
             logger.info("Новых коллекций не найдено (Slashlib).")
 
         # Проверяем удалённые коллекции
-        removed_ids = previous_ids - current_ids
+        removed_ids = processed_ids - current_ids
         if removed_ids:
             logger.info(f"Удалено {len(removed_ids)} коллекций (Slashlib): {removed_ids}")
 
         # Обновляем состояние только если есть изменения
         if new_ids or removed_ids:
             # Обновляем максимальный ID, если есть действительно новые коллекции
-            new_max_id = max(current_ids) if current_ids else previous_max_id
-            save_current_collections(current_ids, new_max_id, CURRENT_COLLECTIONS_FILE_SLASHLIB)
+            new_max_id = max(processed_ids) if processed_ids else previous_max_id
+            save_processed_collections(processed_ids, new_max_id, PROCESSED_COLLECTIONS_FILE)
         else:
             logger.info("Изменений в коллекциях не обнаружено, пропускаем сохранение (Slashlib).")
     finally:
         check_running = False
 
 def sequential_minute_checks():
-    """Последовательное выполнение ежеминутных проверок для Mangalib и Slashlib."""
+    """Последовательное выполнение еjemинутных проверок для Mangalib и Slashlib."""
     if not running:
         return
     logger.info("Запуск последовательных ежеминутных проверок...")
@@ -451,7 +464,7 @@ def full_parse_mangalib():
 
         save_collection_data(collections_data, COLLECTION_DATA_FILE_MANGALIB)
         # Инициализируем файл для ежеминутного парсинга
-        initialize_current_collections(COLLECTION_DATA_FILE_MANGALIB, CURRENT_COLLECTIONS_FILE_MANGALIB, "Mangalib")
+        initialize_processed_collections(COLLECTION_DATA_FILE_MANGALIB, COLLECTION_DATA_FILE_SLASHLIB)
     finally:
         full_parse_running = False
 
@@ -474,7 +487,7 @@ def full_parse_slashlib():
 
         save_collection_data(collections_data, COLLECTION_DATA_FILE_SLASHLIB)
         # Инициализируем файл для ежеминутного парсинга
-        initialize_current_collections(COLLECTION_DATA_FILE_SLASHLIB, CURRENT_COLLECTIONS_FILE_SLASHLIB, "Slashlib")
+        initialize_processed_collections(COLLECTION_DATA_FILE_MANGALIB, COLLECTION_DATA_FILE_SLASHLIB)
     finally:
         full_parse_running = False
 
